@@ -10,144 +10,114 @@ namespace ImageClassificationTest
     class Program
     {
         // 학습에 필요한 경로 변수 정의
-        // <SnippetDeclareGlobalVariables>
         static readonly string _assetsPath = Path.Combine(Environment.CurrentDirectory, "assets");
         static readonly string _imagesFolder = Path.Combine(_assetsPath, "images");
         static readonly string _trainTagsTsv = Path.Combine(_imagesFolder, "tags.tsv");
         static readonly string _testTagsTsv = Path.Combine(_imagesFolder, "test-tags.tsv");
         static readonly string _predictSingleImage = Path.Combine(_imagesFolder, "toaster3.jpg");
         static readonly string _inceptionTensorFlowModel = Path.Combine(_assetsPath, "inception", "tensorflow_inception_graph.pb");
-        // </SnippetDeclareGlobalVariables>
 
         static void Main(string[] args)
         {
-            // Create MLContext to be shared across the model creation workflow objects
-            // <SnippetCreateMLContext>
+            // ML Context 생성
             MLContext mlContext = new MLContext();
-            // </SnippetCreateMLContext>
 
-            // <SnippetCallGenerateModel>
+            // Model 생성
             ITransformer model = GenerateModel(mlContext);
-            // </SnippetCallGenerateModel>
 
-            // <SnippetCallClassifySingleImage>
             ClassifySingleImage(mlContext, model);
-            // </SnippetCallClassifySingleImage>
-
             Console.ReadKey();
         }
 
-        // Build and train model
+        /// <summary>
+        /// 트레이닝 모델을 구축
+        /// </summary>
+        /// <param name="mlContext"></param>
+        /// <returns></returns>
         public static ITransformer GenerateModel(MLContext mlContext)
         {
-            // <SnippetImageTransforms>
             IEstimator<ITransformer> pipeline = mlContext.Transforms.LoadImages(outputColumnName: "input", imageFolder: _imagesFolder, inputColumnName: nameof(ImageData.ImagePath))
-                            // The image transforms transform the images into the model's expected format.
+                            // 이미지를 모델의 예상 형식으로 변환.
                             .Append(mlContext.Transforms.ResizeImages(outputColumnName: "input", imageWidth: InceptionSettings.ImageWidth, imageHeight: InceptionSettings.ImageHeight, inputColumnName: "input"))
                             .Append(mlContext.Transforms.ExtractPixels(outputColumnName: "input", interleavePixelColors: InceptionSettings.ChannelsLast, offsetImage: InceptionSettings.Mean))
-                            // </SnippetImageTransforms>
-                            // The ScoreTensorFlowModel transform scores the TensorFlow model and allows communication
-                            // <SnippetScoreTensorFlowModel>
+                            // TensorFlow 모델에 점수를 매기고 통신을 허용.
                             .Append(mlContext.Model.LoadTensorFlowModel(_inceptionTensorFlowModel).
                                 ScoreTensorFlowModel(outputColumnNames: new[] { "softmax2_pre_activation" }, inputColumnNames: new[] { "input" }, addBatchDimensionInput: true))
-                            // </SnippetScoreTensorFlowModel>
-                            // <SnippetMapValueToKey>
+                           
                             .Append(mlContext.Transforms.Conversion.MapValueToKey(outputColumnName: "LabelKey", inputColumnName: "Label"))
-                            // </SnippetMapValueToKey>
-                            // <SnippetAddTrainer>
+                           
                             .Append(mlContext.MulticlassClassification.Trainers.LbfgsMaximumEntropy(labelColumnName: "LabelKey", featureColumnName: "softmax2_pre_activation"))
-                            // </SnippetAddTrainer>
-                            // <SnippetMapKeyToValue>
+                          
                             .Append(mlContext.Transforms.Conversion.MapKeyToValue("PredictedLabelValue", "PredictedLabel"))
                             .AppendCacheCheckpoint(mlContext);
-            // </SnippetMapKeyToValue>
-
-            // <SnippetLoadData>
+   
             IDataView trainingData = mlContext.Data.LoadFromTextFile<ImageData>(path: _trainTagsTsv, hasHeader: false);
-            // </SnippetLoadData>
-
-            // Train the model
+   
+            // 모델 학습
             Console.WriteLine("=============== Training classification model ===============");
-            // Create and train the model
-            // <SnippetTrainModel>
+            // 모델 생성 및 학습
             ITransformer model = pipeline.Fit(trainingData);
-            // </SnippetTrainModel>
-
-            // Generate predictions from the test data, to be evaluated
+            // 평가를 위해 테스트 데이터로부터 예측치를 생성
             // <SnippetLoadAndTransformTestData>
             IDataView testData = mlContext.Data.LoadFromTextFile<ImageData>(path: _testTagsTsv, hasHeader: false);
             IDataView predictions = model.Transform(testData);
 
-            // Create an IEnumerable for the predictions for displaying results
+            // 예측 결과를 표현하기 위해 IEnumerable를 생성
             IEnumerable<ImagePrediction> imagePredictionData = mlContext.Data.CreateEnumerable<ImagePrediction>(predictions, true);
             DisplayResults(imagePredictionData);
-            // </SnippetLoadAndTransformTestData>
 
-            // Get performance metrics on the model using training data
+            // 트레이닝 데이터를 이용한 모델의 메트릭스 퍼포먼스를 가져옴.
             Console.WriteLine("=============== Classification metrics ===============");
 
-            // <SnippetEvaluate>
             MulticlassClassificationMetrics metrics =
                 mlContext.MulticlassClassification.Evaluate(predictions,
                   labelColumnName: "LabelKey",
                   predictedLabelColumnName: "PredictedLabel");
-            // </SnippetEvaluate>
 
-            //<SnippetDisplayMetrics>
             Console.WriteLine($"LogLoss is: {metrics.LogLoss}");
             Console.WriteLine($"PerClassLogLoss is: {String.Join(" , ", metrics.PerClassLogLoss.Select(c => c.ToString()))}");
-            //</SnippetDisplayMetrics>
-
-            // <SnippetReturnModel>
+           
             return model;
-            // </SnippetReturnModel>
         }
 
+        /// <summary>
+        /// 단일 이미지 분류 처리
+        /// </summary>
+        /// <param name="mlContext"></param>
+        /// <param name="model"></param>
         public static void ClassifySingleImage(MLContext mlContext, ITransformer model)
         {
-            // load the fully qualified image file name into ImageData
-            // <SnippetLoadImageData>
+            // 추정할 이미지 파일 이름을 ImageData에 로드
             var imageData = new ImageData()
             {
                 ImagePath = _predictSingleImage
             };
-            // </SnippetLoadImageData>
 
-            // <SnippetPredictSingle>
-            // Make prediction function (input = ImageData, output = ImagePrediction)
+            // 예측 함수 만들기 (입력 = ImageData, 출력 = ImagePrediction)
             var predictor = mlContext.Model.CreatePredictionEngine<ImageData, ImagePrediction>(model);
             var prediction = predictor.Predict(imageData);
-            // </SnippetPredictSingle>
 
             Console.WriteLine("=============== Making single image classification ===============");
-            // <SnippetDisplayPrediction>
             Console.WriteLine($"Image: {Path.GetFileName(imageData.ImagePath)} predicted as: {prediction.PredictedLabelValue} with score: {prediction.Score.Max()} ");
-            // </SnippetDisplayPrediction>
         }
 
         private static void DisplayResults(IEnumerable<ImagePrediction> imagePredictionData)
         {
-            // <SnippetDisplayPredictions>
             foreach (ImagePrediction prediction in imagePredictionData)
             {
                 Console.WriteLine($"Image: {Path.GetFileName(prediction.ImagePath)} predicted as: {prediction.PredictedLabelValue} with score: {prediction.Score.Max()} ");
             }
-            // </SnippetDisplayPredictions>
         }
 
         public static IEnumerable<ImageData> ReadFromTsv(string file, string folder)
         {
-            //Need to parse through the tags.tsv file to combine the file path to the
-            // image name for the ImagePath property so that the image file can be found.
-
-            // <SnippetReadFromTsv>
+            //이미지 파일을 찾을 수 있도록 파일 경로를 ImagePath 속성의 이미지 이름에 결합하려면 tags.tsv 파일을 구문 분석해야함.
             return File.ReadAllLines(file)
              .Select(line => line.Split('\t'))
              .Select(line => new ImageData()
              {
                  ImagePath = Path.Combine(folder, line[0])
              });
-            // </SnippetReadFromTsv>
         }
 
         public struct InceptionSettings
